@@ -66,6 +66,8 @@ class Server:
         self.pending_replies = 0
         self.election_in_progress = False
         self.election_done = threading.Event()
+        # Election watchdog: avoid stuck elections due to UDP loss / startup races
+        self.election_started_at = None
         self.__open_discovery_socket()
 
         # Client authentication
@@ -193,6 +195,17 @@ class Server:
 
     def validate_leader_state(self):
         """Ensure leader state is consistent with current ring state."""
+        # Election watchdog: if an election gets stuck (e.g., due to startup race / UDP loss), retry.
+        if self.election_in_progress and self.election_started_at is not None:
+            # Conservative timeout: validate loop runs every 5s, so use >5s.
+            if time.time() - self.election_started_at > 8.0:
+                self.log(self.color_text("Election appears stuck; restarting HS", self.COLOR_YELLOW))
+                self.election_in_progress = False
+                self.phase = 0
+                self.pending_replies = 0
+                self.election_started_at = None
+                hs_start(self)
+
         if len(self.servers) == 1:
             if self.leader != self.id or not self.is_leader:
                 self.log(self.color_text("Leader state inconsistent - fixing to self", self.COLOR_RED))

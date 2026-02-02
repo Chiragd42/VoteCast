@@ -104,24 +104,11 @@ class Client:
     def register(self):
         self.__log("Registering client...")
 
-        # Request registration
-        self.__send_register_request()
-        
-        # Wait for reply or request again
-        while self.token is None:
-            try:
-                reply = self.__recv()
-                token = reply.get("token")
-                if token is None:
-                    self.__log(f"Error: Expected 'token': {reply}")
-                    continue
-
-                self.token = token
-                self.__log("Registered successfully")
-                        
-            except socket.timeout:
-                self.__send_register_request()
-                continue
+        # NOTE: __send() already waits for one server response and routes it through
+        # __handle_message() -> __handle_response(). So we just keep retrying until
+        # self.token is set from REGISTER_OK.
+        while self.token is None and not self.stop_event.is_set():
+            self.__send_register_request()
 
     def __get_groups(self):
         self.__send({
@@ -179,7 +166,13 @@ class Client:
                 "answered": False,
                 "S": S
             }
-            self.__log(f"New vote available for {g}: {msg.get('topic')} (Vote ID: {vote_id}, S={S})")
+            topic = msg.get("topic")
+            self.__log(f"New vote available for {g}: {topic} (Vote ID: {vote_id}, S={S})")
+            options = msg.get("options") or []
+            if options:
+                self.__log("Options:")
+                for i, opt in enumerate(options, start=1):
+                    self.__log(f"  {i}: {opt}")
 
     def __send_vote_ack(self, g, vote_id, vote, S):
         # TODO: Send to leader?
@@ -247,7 +240,11 @@ class Client:
             options = msg.get("options")
             print(f"Vote started in group '{group}' on topic '{topic}' with options: {', '.join(options)}")
         elif t == "REGISTER_OK":
-            print("Registration successful")
+            # IMPORTANT: store token so register() loop can terminate.
+            token = msg.get("token")
+            if token:
+                self.token = token
+                self.__log("Registered successfully")
         elif t == "ERROR":
             error = msg.get("error")
             print(f"Error: {error}")
@@ -307,7 +304,12 @@ class Client:
             print("7) Start vote")
             print("8) Vote")
             print("9) Exit")
-            choice = int(input("Choose: "))
+            raw_choice = input("Choose: ").strip()
+            try:
+                choice = int(raw_choice)
+            except ValueError:
+                print("Invalid input. Please enter a number (1-9).")
+                continue
             if choice == 1:
                 print(f"Leader: {self.leader}")
             elif choice == 2:
@@ -337,7 +339,7 @@ class Client:
                 while not stop:
                     i += 1
                     option = input(f"Option {i} ('s' to stop): ")
-                    if option == "s":
+                    if option.strip().lower() == "s":
                         stop = True
                     else:
                         options.append(option)
@@ -360,8 +362,17 @@ class Client:
                     print("  --")
                     vote = None
                     while vote is None:
-                        v = input("Your vote: ")
-                        if v in vote_info['options']:
+                        v = input("Your vote (number or text): ").strip()
+
+                        # Allow numeric choice: "1" => first option
+                        if v.isdigit():
+                            idx = int(v) - 1
+                            if 0 <= idx < len(vote_info["options"]):
+                                vote = vote_info["options"][idx]
+                                break
+
+                        # Allow option text
+                        if v in vote_info["options"]:
                             vote = v
                         else:
                             print(f"{v} is not a valid option!")

@@ -6,12 +6,6 @@ from election import hs_start
 
 
 def discovery_service(server):
-    # If this is the first/only server in view at startup, declare self as leader immediately.
-    if len(server.servers) <= 1:
-        server.leader = server.id
-        server.is_leader = True
-        server.log(server.color_text(f"HS: Leader elected: {server.leader}", server.COLOR_GREEN))
-
     while not server.stop_event.is_set():
         try:
             data, addr = server.mcast.recvfrom(1024)
@@ -23,9 +17,11 @@ def discovery_service(server):
                 # Always ensure self ID is in the view
                 if server.id not in server.servers:
                     server.servers.add(server.id)
+                    server.last_membership_change = time.time()
                 if sid not in server.servers:
                     server.log(server.color_text(f"Server joined: {sid}", server.COLOR_YELLOW))
                     server.servers.add(sid)
+                    server.last_membership_change = time.time()
                     build_ring(server)
                     # Auto-start HS when we have more than one server and ring is ready; new join triggers election
                     if (
@@ -49,6 +45,7 @@ def discovery_service(server):
                     server.log(server.color_text(f"Server left: {sid}", server.COLOR_RED))
                 if server.id not in server.servers:
                     server.servers.add(server.id)
+                server.last_membership_change = time.time()
                 build_ring(server)
         except socket.timeout:
             continue

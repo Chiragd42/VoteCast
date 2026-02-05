@@ -8,8 +8,7 @@ def send_replicate_state(server, new_leader):
         "S": server.S,
         "fo_pending": server.fo_pending,
     }
-    server.leader_send(new_leader, state)
-
+    server.send(new_leader, state)
 
 def replicate_state_apply(server, msg):
     # Convert sets to lists

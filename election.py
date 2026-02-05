@@ -27,6 +27,11 @@ def hs_start(server, *, manual: bool = False):
         server.log("Election already in progress!")
         return
 
+    if time.time() - server.last_membership_change < server.MEMBERSHIP_STABLE_TIME:
+        server.log("HS delayed: membership not stable yet")
+        server.election_retry = True
+        return
+
     # Do not run HS with a single node; wait for discovery of a peer
     if len(server.servers) <= 1:
         server.log("Cannot start HS: only one server in view")
@@ -152,11 +157,13 @@ def hs_declare_leader(server):
     server.log(server.color_text("HS: I am the leader", server.COLOR_GREEN))
     server.leader = server.id
     server.is_leader = True
+    server.was_leader = True
     server.election_in_progress = False
     server.election_done.set()
     server.election_started_at = None
     msg = {"type": "HS_LEADER", "id": server.id}
     server.send(server.left, msg)
+    server.tell_clients_about_new_leader()
 
 
 def hs_leader(server, msg):
@@ -167,7 +174,10 @@ def hs_leader(server, msg):
         return
 
     # If this server was the leader before, replicate its whole state to the new leader.
-    if server.is_leader and cid != server.id:
+    # print("HERE", server.was_leader, cid, server.id)
+    if server.was_leader and cid != server.id:
+        server.was_leader = False
+        print("SEND")
         server.send_replicate_state(cid)
 
     server.leader = cid

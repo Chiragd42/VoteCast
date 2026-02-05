@@ -18,6 +18,7 @@ import handlers
 
 
 HEARTBEAT_TIMEOUT = 5.0
+MEMBERSHIP_STABLE_TIME = 2.0
 COLOR_GREEN = "\033[92m"
 COLOR_YELLOW = "\033[93m"
 COLOR_RED = "\033[91m"
@@ -62,12 +63,14 @@ class Server:
         self.right = None
         self.leader = None
         self.is_leader = False
+        self.was_leader = False
         self.phase = 0
         self.pending_replies = 0
         self.election_in_progress = False
         self.election_done = threading.Event()
         # Election watchdog: avoid stuck elections due to UDP loss / startup races
         self.election_started_at = None
+        self.election_retry = False
         self.__open_discovery_socket()
 
         # Client authentication
@@ -101,6 +104,7 @@ class Server:
         self.MCAST_GRP = MCAST_GRP
         self.MCAST_PORT = MCAST_PORT
         self.HEARTBEAT_TIMEOUT = HEARTBEAT_TIMEOUT
+        self.MEMBERSHIP_STABLE_TIME = MEMBERSHIP_STABLE_TIME
         self.COLOR_GREEN = COLOR_GREEN
         self.COLOR_YELLOW = COLOR_YELLOW
         self.COLOR_RED = COLOR_RED
@@ -109,6 +113,7 @@ class Server:
 
         # Initialize leader state
         self.update_leader_state()
+        self.last_membership_change = time.time()
 
         # Start leader state validation loop
         self.validate_leader_loop_thread = threading.Thread(target=self.__validate_leader_loop)
@@ -159,7 +164,6 @@ class Server:
     def __open_discovery_socket(self):
         self.mcast = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.mcast.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.mcast.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self.mcast.bind(("", MCAST_PORT))
         self.mcast.settimeout(1.0)
         mreq = socket.inet_aton(MCAST_GRP) + socket.inet_aton("0.0.0.0")
@@ -179,13 +183,16 @@ class Server:
         if len(self.servers) == 1:
             self.leader = self.id
             self.is_leader = True
+            self.was_leader = True
             self.log(self.color_text(f"Updated leader: I am the only server, becoming leader", self.COLOR_GREEN))
+            self.tell_clients_about_new_leader()
             return
 
         # If current leader is crashed or not in ring, trigger election
         if self.leader and (self.leader not in self.servers or self.leader == crashed_server):
             self.log(self.color_text(f"Current leader {self.leader} is invalid, triggering election", self.COLOR_YELLOW))
-            hs_start(self)
+            self.leader = None
+            self.is_leader = False
             return
 
         # If we have a valid leader in the ring, keep it
@@ -193,8 +200,23 @@ class Server:
             self.is_leader = (self.leader == self.id)
             self.log(self.color_text(f"Leader remains valid: {self.leader}", self.COLOR_GREEN))
 
+    def tell_clients_about_new_leader(self):
+        # Tell clients that this is the new leader
+        for cid, client in self.clients.items():
+            self.leader_send(client["addr"], {"type": "NEW_LEADER", "id": self.id})
+
     def validate_leader_state(self):
         """Ensure leader state is consistent with current ring state."""
+        # If we have a valid leader and no election is running, do nothing
+        if (not self.election_in_progress and not self.election_retry) and self.leader and self.leader in self.servers:
+            return
+
+        # Ring was not fully built safely, rertry
+        if self.election_retry:
+            self.election_retry = False
+            hs_start(self)
+            return
+
         # Election watchdog: if an election gets stuck (e.g., due to startup race / UDP loss), retry.
         if self.election_in_progress and self.election_started_at is not None:
             # Conservative timeout: validate loop runs every 5s, so use >5s.
@@ -205,12 +227,15 @@ class Server:
                 self.pending_replies = 0
                 self.election_started_at = None
                 hs_start(self)
+                return
 
         if len(self.servers) == 1:
             if self.leader != self.id or not self.is_leader:
                 self.log(self.color_text("Leader state inconsistent - fixing to self", self.COLOR_RED))
                 self.leader = self.id
                 self.is_leader = True
+                self.was_leader = True
+                self.tell_clients_about_new_leader()
         elif self.leader and self.leader not in self.servers:
             self.log(self.color_text(f"Leader {self.leader} not in ring, triggering election", self.COLOR_RED))
             hs_start(self)
@@ -378,6 +403,15 @@ class Server:
                 self.heartbeat_ack_received = True
         else:
             self.__log(f"Error: Got invalid message: {msg}")
+            return
+        
+        # Leader multicasts all incoming requests to 
+        # non leader servers so that they can continue
+        # in the case he fails / crashes.
+        if self.is_leader and t not in ["HS_ELECTION", "HS_REPLY", "HS_LEADER", "REGISTER", "START_VOTE", "REPL_STATE"]:
+            for server in self.servers:
+                if server != self.id:
+                    self.__leader_send(server, msg)
 
     def message_handling(self):
         while not self.stop_event.is_set():

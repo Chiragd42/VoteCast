@@ -10,20 +10,38 @@ def send_replicate_state(server, new_leader):
     }
     server.send(new_leader, state)
 
+
 def replicate_state_apply(server, msg):
-    # Convert sets to lists
-    server.clients = {cid: {"token": client["token"], "addr": tuple(client["addr"])} for cid, client in msg["clients"].items()}
+    # Merge clients
+    for cid, client in msg["clients"].items():
+        server.clients[cid] = {"token": client["token"], "addr": tuple(client["addr"])}
 
-    server.groups = {name: {
-        "owner": group["owner"],
-        "members": list(group["members"])
-    } for name, group in msg["groups"].items()}
+    # Merge groups
+    for name, group in msg["groups"].items():
+        if name not in server.groups:
+            server.groups[name] = {"owner": group["owner"], "members": set(group["members"])}
+        else:
+            server.groups[name]["members"].update(group["members"])
+            # Optionally update owner if needed
+            server.groups[name]["owner"] = group["owner"]
 
-    server.votes = msg["votes"]
-    server.S = msg["S"]
-    server.fo_pending = msg["fo_pending"]
+    # Merge votes
+    for vote_id, vote in msg["votes"].items():
+        server.votes[vote_id] = vote
 
-    # Tell clients that this is the new leader
+    # Merge FO state
+    for g, seq in msg["S"].items():
+        server.S[g] = max(server.S.get(g, 0), seq)
+
+    for key, pending in msg["fo_pending"].items():
+        if key not in server.fo_pending:
+            server.fo_pending[key] = pending
+        else:
+            # Optional: merge pending sets if you want
+            server.fo_pending[key]["pending"].update(pending.get("pending", set()))
+            server.fo_pending[key]["deadline"] = max(server.fo_pending[key]["deadline"], pending["deadline"])
+
+    # Notify clients about new leader
     tell_clients_about_new_leader(server)
 
 

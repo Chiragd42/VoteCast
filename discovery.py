@@ -24,9 +24,7 @@ def discovery_service(server):
                     server.last_membership_change = time.time()
                     build_ring(server)
                     # Auto-start HS when we have more than one server and ring is ready; new join triggers election
-                    if (
-                        not server.election_in_progress
-                        and len(server.servers) > 1
+                    if (len(server.servers) > 1
                         and server.left is not None
                         and server.right is not None
                     ):

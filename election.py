@@ -22,11 +22,7 @@ def _ensure_ring_ready(server, *, candidate_id: Optional[str] = None) -> bool:
     return server.left is not None and server.right is not None
 
 
-def hs_start(server, *, manual: bool = False):
-    if server.election_in_progress:
-        server.log("Election already in progress!")
-        return
-
+def hs_start(server):
     if time.time() - server.last_membership_change < server.MEMBERSHIP_STABLE_TIME:
         server.log("HS delayed: membership not stable yet")
         server.election_retry = True
@@ -35,27 +31,20 @@ def hs_start(server, *, manual: bool = False):
     # Do not run HS with a single node; wait for discovery of a peer
     if len(server.servers) <= 1:
         server.log("Cannot start HS: only one server in view")
-        server.election_in_progress = False
         return
 
     if server.left is None or server.right is None:
         # Ensure ring is ready before starting election
         if not _ensure_ring_ready(server):
             server.log("Cannot start HS: ring not ready after rebuild")
-            server.election_in_progress = False
             server.phase = 0
             return
 
-    server.election_in_progress = True
-    server.election_done.clear()
     server.leader = None
     server.is_leader = False
     server.phase = 0
-    server.election_started_at = time.time()
     server.log(server.color_text("Starting Hirschberg-Sinclair election...", server.COLOR_GREEN))
     hs_send_neighbors(server)
-    if manual:
-        server.election_done.wait(timeout=10)
 
 
 def hs_send_neighbors(server):
@@ -80,10 +69,8 @@ def hs_send_neighbors(server):
     # If both neighbors missing, abort election
     if server.pending_replies <= 0:
         # Abort: no neighbors available
-        server.election_in_progress = False
         server.phase = 0
         server.leader = server.leader or None
-        server.election_done.set()
 
 
 def hs_election(server, msg):
@@ -99,16 +86,14 @@ def hs_election(server, msg):
     if not _ensure_ring_ready(server, candidate_id=cid):
         server.log(f"HS_ELECTION: ring not ready yet; rebuilding and retrying later")
         # Trigger a fresh election if we're not already in one; avoids deadlock.
-        if not server.election_in_progress and len(server.servers) > 1:
+        if len(server.servers) > 1:
             hs_start(server)
         return
 
     neighbor = server.left if direction == "LEFT" else server.right
 
     if cid < server.id:
-        # Swallow message from lower IDs or start own election
-        if not server.election_in_progress:
-            hs_start(server)
+        # Swallow message from lower IDs
         return
 
     if hop > 1:
@@ -133,7 +118,7 @@ def hs_reply(server, msg):
 
     if not _ensure_ring_ready(server, candidate_id=cid):
         server.log("HS_REPLY: ring not ready yet; rebuilding and retrying later")
-        if not server.election_in_progress and len(server.servers) > 1:
+        if len(server.servers) > 1:
             hs_start(server)
         return
 
@@ -158,9 +143,6 @@ def hs_declare_leader(server):
     server.leader = server.id
     server.is_leader = True
     server.was_leader = True
-    server.election_in_progress = False
-    server.election_done.set()
-    server.election_started_at = None
     msg = {"type": "HS_LEADER", "id": server.id}
     server.send(server.left, msg)
     server.tell_clients_about_new_leader()
@@ -182,9 +164,6 @@ def hs_leader(server, msg):
 
     server.leader = cid
     server.is_leader = (server.leader == server.id)
-    server.election_in_progress = False
-    server.election_done.set()
-    server.election_started_at = None
     server.log(server.color_text(f"HS: Leader elected: {server.leader}", server.COLOR_GREEN))
 
     # CRITICAL FIX: Add null check before sending

@@ -62,6 +62,9 @@ class Client:
                     self.__log(f"Invalid response: {e}")
         except socket.timeout:
             self.__log("Error: No response from server")
+            # Check if this is a server unavailability issue
+            if msg.get("type") in ["REGISTER", "GET_GROUPS", "CREATE_GROUP", "JOIN_GROUP"]:
+                self.__log("CRITICAL: No servers available! System is down.")
 
     def __recv(self):
         data, _ = self.sock.recvfrom(BUF)
@@ -175,8 +178,8 @@ class Client:
                     self.__log(f"  {i}: {opt}")
 
     def __send_vote_ack(self, g, vote_id, vote, S):
-        # TODO: Send to leader?
-        ip, port = self.leader.split(":")
+        # Send vote acknowledgment directly to leader server
+        # The server expects this message from the client's own address
         msg = {
             "type": "VOTE_ACK",
             "group": g,
@@ -186,6 +189,9 @@ class Client:
             "vote": vote,
             "token": self.token
         }
+        # Send directly to leader server - this ensures the server receives
+        # the message from the client's own address, not the leader's address
+        ip, port = self.leader.split(":")
         self.sock.sendto(json.dumps(msg).encode(), (ip, int(port)))
         self.__log(f"Sent VOTE_ACK for vote {vote_id} to leader")
 

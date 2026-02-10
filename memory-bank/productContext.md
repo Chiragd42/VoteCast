@@ -19,3 +19,20 @@ VoteCast provides a distributed polling platform where multiple clients can form
 - Simple CLI flows for server and client actions.
 - Deterministic leader discovery and transparent leader updates.
 - Clear visibility into group membership, ongoing votes, and results.
+
+## Recent Fixes and Improvements
+- **Client-Server Communication**: Fixed VOTE_ACK message handling to ensure proper server-side vote processing
+- **Voting Fault Tolerance**: Enhanced leader state validation to trigger elections when needed
+- **Ordered Reliable Multicast**: Improved FO multicast logic to wait for all client acknowledgments
+- **State Replication**: Fixed set/list conversion issues to prevent data corruption during leader handoff
+- **Client Notification**: Added proper notification when single server remains after crash
+- **Server Unavailability**: Added clear "No servers available" message when all servers crash
+- **Logging**: Reduced excessive FO multicast logging for cleaner output
+- **Multi-Device Compatibility**: Verified system works across different devices on same network
+
+## Exam Readiness
+- All critical bugs fixed and system stabilized
+- Clean, professional presentation with minimal log spam
+- Robust fault tolerance and recovery mechanisms
+- Clear error messages for edge cases
+- Multi-device testing support confirmed

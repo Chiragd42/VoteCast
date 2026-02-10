@@ -190,6 +190,16 @@ class Server:
             self.log(self.color_text(f"Current leader {self.leader} is invalid, triggering election", self.COLOR_YELLOW))
             self.leader = None
             self.is_leader = False
+            # Trigger election to find new leader
+            if len(self.servers) > 1:
+                hs_start(self)
+            else:
+                # CRITICAL FIX: If only one server left after crash, become leader and notify clients
+                self.leader = self.id
+                self.is_leader = True
+                self.was_leader = True
+                self.log(self.color_text(f"Only server remaining, becoming leader", self.COLOR_GREEN))
+                self.tell_clients_about_new_leader()
             return
 
         # If we have a valid leader in the ring, keep it

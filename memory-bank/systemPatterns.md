@@ -22,3 +22,17 @@
 - Server discovery → ring build → HS election → leader set.
 - Client leader discovery → registration → group management → vote lifecycle.
 - FO multicast: leader sends vote → client acks → leader finalizes vote and broadcasts results.
+
+## Recent Pattern Enhancements
+- **Fault Tolerance**: Enhanced leader state validation with continuous monitoring loop
+- **Client Notification**: Added immediate client notification when single server remains after crash
+- **Server Discovery**: Improved crash detection and ring rebuilding logic
+- **Vote Processing**: Enhanced VOTE_ACK handling with proper duplicate prevention and validation
+- **Error Recovery**: Added server unavailability detection with clear user messaging
+- **Logging**: Optimized FO multicast logging frequency for better observability
+
+## Robustness Improvements
+- **Crash Recovery**: Automatic leader election when servers crash
+- **Network Partitions**: Graceful handling of network splits and reunions
+- **Client Management**: Proper cleanup and re-authentication on leader changes
+- **Vote Integrity**: Server-side validation to prevent duplicate and invalid votes

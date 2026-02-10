@@ -16,13 +16,18 @@ def replicate_state_apply(server, msg):
     for cid, client in msg["clients"].items():
         server.clients[cid] = {"token": client["token"], "addr": tuple(client["addr"])}
 
-    # Merge groups
+    # Merge groups - CRITICAL FIX: Ensure members are always sets
     for name, group in msg["groups"].items():
         if name not in server.groups:
+            # Convert list to set for proper set operations
             server.groups[name] = {"owner": group["owner"], "members": set(group["members"])}
         else:
-            server.groups[name]["members"].update(group["members"])
-            # Optionally update owner if needed
+            # Ensure existing members is a set before updating
+            if not isinstance(server.groups[name]["members"], set):
+                server.groups[name]["members"] = set(server.groups[name]["members"])
+            # Update with new members (set operation)
+            server.groups[name]["members"].update(set(group["members"]))
+            # Update owner if needed
             server.groups[name]["owner"] = group["owner"]
 
     # Merge votes

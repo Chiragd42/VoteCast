@@ -40,8 +40,6 @@ def hs_start(server):
             server.phase = 0
             return
 
-    server.leader = None
-    server.is_leader = False
     server.phase = 0
     server.log(server.color_text("Starting Hirschberg-Sinclair election...", server.COLOR_GREEN))
     hs_send_neighbors(server)

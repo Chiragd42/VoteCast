@@ -43,22 +43,12 @@ def fo_retransmit_loop(server):
         for key, entry in list(server.fo_pending.items()):
             group, seq = key
 
-            # Only finalize if deadline passed AND all clients have acknowledged
-            if now > entry["deadline"]:
-                if not entry["pending"]:  # All clients have acknowledged
-                    finished.append(key)
-                else:
-                    # Some clients haven't acknowledged yet, continue retransmitting
-                    server.log(f"FO multicast timeout for {group}, seq={seq}, but {len(entry['pending'])} clients still pending")
-                    # Continue retransmitting to remaining pending clients
-                    for cid in entry["pending"]:
-                        server.leader_send(server.clients[cid]["addr"], entry["msg"])
+            if now > entry["deadline"] or not entry["pending"]:
+                finished.append(key)
                 continue
 
-            # If not timed out, retransmit to pending clients (limit frequency)
-            if now % 5 < 0.5:  # Only log every 5 seconds
-                for cid in entry["pending"]:
-                    server.leader_send(server.clients[cid]["addr"], entry["msg"])
+            for cid in entry["pending"]:
+                server.leader_send(server.clients[cid]["addr"], entry["msg"])
 
         for key in finished:
             group, seq = key
